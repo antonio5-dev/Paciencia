@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Paciência</title>
+<meta name="theme-color" content="#0b6b3a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Paciência">
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;touch-action:none}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none;color:#fff;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  background:radial-gradient(ellipse at center,#12874a,#0a5530)}
+#bar{position:absolute;left:0;right:0;top:0;height:34px;display:flex;align-items:center;gap:6px;
+  padding:0 max(8px,env(safe-area-inset-left));background:rgba(0,0,0,.28);font-size:13px;z-index:50}
+#bar .info{flex:1;display:flex;gap:16px;justify-content:center;white-space:nowrap}
+button{font:inherit;color:#fff;background:rgba(255,255,255,.18);border:0;border-radius:6px;padding:5px 10px;white-space:nowrap}
+button:active{background:rgba(255,255,255,.38)}
+#bInst{background:#f4c20d;color:#222;font-weight:700}
+#board{position:absolute;left:0;right:0;top:34px;bottom:0;z-index:0}
+.slot{position:absolute;z-index:-1;width:var(--w);height:var(--h);border-radius:calc(var(--w)*.1);
+  border:2px solid rgba(255,255,255,.25);background:rgba(0,0,0,.1);display:flex;align-items:center;
+  justify-content:center;font-size:calc(var(--w)*.5);color:rgba(255,255,255,.35)}
+.card{position:absolute;width:var(--w);height:var(--h);border-radius:calc(var(--w)*.1);background:#fff;color:#111;
+  box-shadow:0 1px 3px rgba(0,0,0,.5);font-weight:700;overflow:hidden;
+  transition:left .18s,top .18s,transform .18s}
+.card.red{color:#c62828}
+.card .tl{position:absolute;left:6%;top:2%;font-size:calc(var(--w)*.3);line-height:1.1;letter-spacing:-.04em;white-space:nowrap}
+.card .ct{position:absolute;left:0;right:0;bottom:4%;text-align:center;font-size:calc(var(--w)*.6);line-height:1}
+.card.down{background:repeating-linear-gradient(45deg,#1e56a8 0 6px,#2d6fd1 6px 12px);border:3px solid #fff}
+.card.down span{display:none}
+.card.drag{transition:none;box-shadow:0 8px 16px rgba(0,0,0,.5)}
+#win{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;text-align:center;z-index:200}
+#win.show{display:flex}
+#win h1{margin:0 0 6px}
+#win button{font-size:18px;padding:10px 20px;background:#f4c20d;color:#222;font-weight:700;margin-top:10px}
+#rot{display:none;position:fixed;inset:0;background:#0b3d22;z-index:9999;align-items:center;justify-content:center;
+  text-align:center;font-size:22px;line-height:1.5}
+@media (orientation:portrait) and (max-width:700px){#rot{display:flex}}
+#toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:rgba(0,0,0,.85);padding:10px 16px;
+  border-radius:10px;font-size:14px;z-index:300;display:none;max-width:90%;text-align:center}
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="bUndo">↶ Desfazer</button>
+  <button id="bNew">Novo jogo</button>
+  <button id="bDraw">Comprar: 3</button>
+  <div class="info"><span id="iT">0:00</span><span id="iM">0 movs</span><span id="iS">0 pts</span></div>
+  <button id="bInst" hidden>⬇ Instalar app</button>
+</div>
+<div id="board"></div>
+<div id="win"><div><h1>🎉 Você venceu!</h1><p id="wInfo"></p><button id="wNew">Novo jogo</button></div></div>
+<div id="rot">📱<br>Gire o celular<br>para o modo horizontal</div>
+<div id="toast"></div>
+
+<script>
+(()=>{
+const $=id=>document.getElementById(id);
+const SUITS=['♠','♥','♦','♣'],RANKS=['','A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+const isRed=s=>s===1||s===2;
+const board=$('board'),els={};
+let S,L={},hist=[],drag=null,won=false,auto=false;
+let draw=+localStorage.getItem('pac_draw')||3;
+
+/* ---------- espaços vazios ---------- */
+const slots={};
+['stock','waste','f0','f1','f2','f3','t0','t1','t2','t3','t4','t5','t6'].forEach(k=>{
+  const d=document.createElement('div');d.className='slot';d.dataset.k=k;board.appendChild(d);slots[k]=d;
+});
+slots.stock.textContent='↻';
+
+/* ---------- estado ---------- */
+function newGame(){
+  Object.keys(els).forEach(k=>{els[k].remove();delete els[k]});
+  const deck=[];
+  for(let s=0;s<4;s++)for(let r=1;r<=13;r++)deck.push({id:s*13+r-1,s,r,up:false});
+  for(let i=51;i>0;i--){const j=Math.random()*(i+1)|0;[deck[i],deck[j]]=[deck[j],deck[i]]}
+  const tab=[];
+  for(let i=0;i<7;i++){const col=deck.splice(0,i+1);col[i].up=true;tab.push(col)}
+  S={stock:deck,waste:[],found:[[],[],[],[]],tab,moves:0,score:0,time:0,draw};
+  hist=[];won=false;auto=false;
+  $('win').classList.remove('show');
+  render();save();
+}
+function load(){
+  try{
+    const s=JSON.parse(localStorage.getItem('pac_state'));
+    const n=s.stock.length+s.waste.length+s.found.flat().length+s.tab.flat().length;
+    if(n===52){S=s;draw=s.draw||draw;return true}
+  }catch(e){}
+  return false;
+}
+const save=()=>{if(!won)localStorage.setItem('pac_state',JSON.stringify(S))};
+const snap=()=>{hist.push(JSON.stringify(S));if(hist.length>300)hist.shift()};
+
+/* ---------- layout ---------- */
+function layout(){
+  const W=board.clientWidth,H=board.clientHeight;
+  const w=Math.floor(Math.min(W/8.2,H*0.2,120)),h=Math.round(w*1.4);
+  const gap=Math.max(4,Math.floor(w*.14));
+  const ml=Math.floor((W-(7*w+6*gap))/2);
+  const top=Math.max(4,Math.floor(H*.02));
+  L={W,H,w,h,gap,ml,top,ty:top+h+Math.floor(gap*1.2)};
+  board.style.setProperty('--w',w+'px');board.style.setProperty('--h',h+'px');
+}
+const colX=i=>L.ml+i*(L.w+L.gap);
+
+function cardEl(c){
+  if(els[c.id])return els[c.id];
+  const e=document.createElement('div');
+  e.className='card'+(isRed(c.s)?' red':'');
+  e.dataset.id=c.id;
+  e.innerHTML=`<span class="tl">${RANKS[c.r]}${SUITS[c.s]}</span><span class="ct">${SUITS[c.s]}</span>`;
+  board.appendChild(e);els[c.id]=e;return e;
+}
+function place(c,x,y,z){
+  const e=cardEl(c);
+  e.style.left=x+'px';e.style.top=y+'px';e.style.zIndex=z;
+  e.classList.toggle('down',!c.up);
+}
+function render(){
+  layout();
+  const set=(k,x,y)=>{const s=slots[k].style;s.left=x+'px';s.top=y+'px'};
+  set('stock',colX(0),L.top);set('waste',colX(1),L.top);
+  for(let i=0;i<4;i++)set('f'+i,colX(3+i),L.top);
+  for(let i=0;i<7;i++)set('t'+i,colX(i),L.ty);
+
+  S.stock.forEach((c,i)=>place(c,colX(0),L.top,i));
+  const wl=S.waste.length,show=S.draw===3?Math.min(3,wl):1;
+  S.waste.forEach((c,i)=>{const k=i-(wl-show);place(c,colX(1)+(k>0?k*L.w*.28:0),L.top,i)});
+  S.found.forEach((p,f)=>p.forEach((c,i)=>place(c,colX(3+f),L.top,i)));
+  S.tab.forEach((col,ci)=>{
+    const avail=L.H-L.ty-L.h-4;
+    let nd=0,nu=0;
+    col.forEach((c,i)=>{if(i<col.length-1){c.up?nu++:nd++}});
+    let dO=L.h*.12,uO=L.h*.3;
+    const need=nd*dO+nu*uO;
+    if(need>avail){const f=avail/need;dO*=f;uO*=f}
+    let y=L.ty;
+    col.forEach((c,i)=>{place(c,colX(ci),y,i);y+=c.up?uO:dO});
+  });
+  $('bDraw').textContent='Comprar: '+S.draw;
+  info();
+}
+const fmt=t=>Math.floor(t/60)+':'+String(t%60).padStart(2,'0');
+function info(){$('iT').textContent=fmt(S.time);$('iM').textContent=S.moves+' movs';$('iS').textContent=S.score+' pts'}
+
+/* ---------- regras ---------- */
+function locate(id){
+  let i=S.stock.findIndex(c=>c.id===id);if(i>=0)return{t:'stock',p:0,i};
+  i=S.waste.findIndex(c=>c.id===id);if(i>=0)return{t:'waste',p:0,i};
+  for(let p=0;p<4;p++){i=S.found[p].findIndex(c=>c.id===id);if(i>=0)return{t:'found',p,i}}
+  for(let p=0;p<7;p++){i=S.tab[p].findIndex(c=>c.id===id);if(i>=0)return{t:'tab',p,i}}
+}
+const pileOf=l=>l.t==='tab'?S.tab[l.p]:l.t==='found'?S.found[l.p]:S[l.t];
+
+function can(cards,d){
+  const c=cards[0];
+  if(d.t==='found'){
+    if(cards.length!==1)return false;
+    const p=S.found[d.p];
+    return p.length?(p[p.length-1].s===c.s&&p[p.length-1].r===c.r-1):c.r===1;
+  }
+  const p=S.tab[d.p];
+  if(!p.length)return c.r===13;
+  const t=p[p.length-1];
+  return t.up&&isRed(t.s)!==isRed(c.s)&&t.r===c.r+1;
+}
+function ok(loc,cards,d){
+  if(d.t===loc.t&&d.p===loc.p)return false;
+  if(d.t==='found'&&loc.t==='found')return false;
+  return can(cards,d);
+}
+function moveTo(loc,cards,d){
+  snap();
+  const src=pileOf(loc);src.splice(loc.i);
+  (d.t==='found'?S.found[d.p]:S.tab[d.p]).push(...cards);
+  let sc=d.t==='found'?10:loc.t==='waste'?5:loc.t==='found'?-15:0;
+  if(loc.t==='tab'&&src.length&&!src[src.length-1].up){src[src.length-1].up=true;sc+=5}
+  S.score=Math.max(0,S.score+sc);S.moves++;
+  render();save();
+  if(!checkWin()&&!auto&&canAuto())autoFinish();
+}
+function autoMove(loc,cards){
+  const dests=[];
+  if(cards.length===1)for(let f=0;f<4;f++)dests.push({t:'found',p:f});
+  for(let p=0;p<7;p++)if(S.tab[p].length)dests.push({t:'tab',p});
+  for(let p=0;p<7;p++)if(!S.tab[p].length)dests.push({t:'tab',p});
+  for(const d of dests){
+    if(d.t==='tab'&&!S.tab[d.p].length&&loc.t==='tab'&&loc.i===0)continue;
+    if(ok(loc,cards,d)){moveTo(loc,cards,d);return}
+  }
+}
+function drawCard(){
+  snap();
+  if(S.stock.length){
+    const n=Math.min(S.draw,S.stock.length);
+    for(let k=0;k<n;k++){const c=S.stock.pop();c.up=true;S.waste.push(c)}
+  }else if(S.waste.length){
+    while(S.waste.length){const c=S.waste.pop();c.up=false;S.stock.push(c)}
+  }else{hist.pop();return}
+  S.moves++;render();save();
+}
+function undo(){
+  if(!hist.length||auto||won)return;
+  const t=S.time;S=JSON.parse(hist.pop());S.time=t;render();save();
+}
+function checkWin(){
+  if(S.found.every(p=>p.length===13)){
+    won=true;hist=[];localStorage.removeItem('pac_state');
+    $('wInfo').textContent=`Tempo ${fmt(S.time)} · ${S.moves} movimentos · ${S.score} pontos`;
+    $('win').classList.add('show');return true;
+  }
+  return false;
+}
+const canAuto=()=>!S.stock.length&&!S.waste.length&&S.tab.every(col=>col.every(c=>c.up));
+function autoFinish(){
+  auto=true;snap();
+  const step=()=>{
+    for(let p=0;p<7;p++){
+      const col=S.tab[p];if(!col.length)continue;
+      const c=col[col.length-1];
+      for(let f=0;f<4;f++){
+        if(can([c],{t:'found',p:f})){
+          col.pop();S.found[f].push(c);S.score+=10;S.moves++;
+          render();save();
+          if(checkWin()){auto=false;return}
+          setTimeout(step,80);return;
+        }
+      }
+    }
+    auto=false;
+  };
+  step();
+}
+
+/* ---------- toque / arrastar ---------- */
+board.addEventListener('pointerdown',ev=>{
+  if(won||auto||drag)return;
+  const ce=ev.target.closest('.card');
+  if(!ce){
+    const sl=ev.target.closest('.slot');
+    if(sl&&sl.dataset.k==='stock')drawCard();
+    return;
+  }
+  const loc=locate(+ce.dataset.id);if(!loc)return;
+  if(loc.t==='stock'){drawCard();return}
+  const pile=pileOf(loc),c=pile[loc.i];
+  if(!c.up)return;
+  if((loc.t==='waste'||loc.t==='found')&&loc.i!==pile.length-1)return;
+  drag={loc,cards:pile.slice(loc.i),x0:ev.clientX,y0:ev.clientY,dx:0,dy:0,moved:false,pid:ev.pointerId};
+  board.setPointerCapture(ev.pointerId);
+});
+board.addEventListener('pointermove',ev=>{
+  if(!drag||ev.pointerId!==drag.pid)return;
+  const dx=ev.clientX-drag.x0,dy=ev.clientY-drag.y0;
+  if(!drag.moved){
+    if(Math.hypot(dx,dy)<8)return;
+    drag.moved=true;
+    drag.cards.forEach((c,k)=>{const e=els[c.id];e.classList.add('drag');e.style.zIndex=1000+k});
+  }
+  drag.dx=dx;drag.dy=dy;
+  drag.cards.forEach(c=>els[c.id].style.transform=`translate(${dx}px,${dy}px)`);
+});
+function pickDest(cx,cy){
+  const dist=i=>Math.abs(cx-(colX(i)+L.w/2));
+  if(cy<L.ty){
+    let best=null,bd=1e9;
+    for(let i=3;i<7;i++)if(dist(i)<bd){bd=dist(i);best=i}
+    return bd<L.w*.8?{t:'found',p:best-3}:null;
+  }
+  let best=0,bd=1e9;
+  for(let i=0;i<7;i++)if(dist(i)<bd){bd=dist(i);best=i}
+  return bd<L.w*.8+L.gap?{t:'tab',p:best}:null;
+}
+function endDrag(ev,cancel){
+  if(!drag||ev.pointerId!==drag.pid)return;
+  const d=drag;drag=null;
+  if(!d.moved){if(!cancel)autoMove(d.loc,d.cards);return}
+  d.cards.forEach(c=>{const e=els[c.id];e.classList.remove('drag');e.style.transform=''});
+  if(cancel){render();return}
+  const f=els[d.cards[0].id];
+  const cx=parseFloat(f.style.left)+L.w/2+d.dx,cy=parseFloat(f.style.top)+L.h/2+d.dy;
+  const dest=pickDest(cx,cy);
+  if(dest&&ok(d.loc,d.cards,dest))moveTo(d.loc,d.cards,dest);else render();
+}
+board.addEventListener('pointerup',e=>endDrag(e,false));
+board.addEventListener('pointercancel',e=>endDrag(e,true));
+
+/* ---------- botões ---------- */
+$('bUndo').onclick=undo;
+$('bNew').onclick=()=>{if(won||S.moves===0||confirm('Começar um novo jogo?'))newGame()};
+$('wNew').onclick=newGame;
+$('bDraw').onclick=()=>{
+  const n=draw===3?1:3;
+  if(confirm(`Mudar para comprar ${n} carta(s)? Isso inicia um novo jogo.`)){
+    draw=n;localStorage.setItem('pac_draw',n);newGame();
+  }
+};
+
+/* ---------- instalação ---------- */
+const toast=(msg,ms=6000)=>{const t=$('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',ms)};
+let deferred;
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferred=e;$('bInst').hidden=false});
+$('bInst').onclick=async()=>{if(!deferred)return;deferred.prompt();await deferred.userChoice;deferred=null;$('bInst').hidden=true};
+addEventListener('appinstalled',()=>{$('bInst').hidden=true});
+const ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
+const standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone;
+if(ios&&!standalone&&!localStorage.getItem('pac_ios')){
+  setTimeout(()=>{toast('Para instalar: toque em Compartilhar ⬆ e depois em "Adicionar à Tela de Início"',8000);localStorage.setItem('pac_ios','1')},1500);
+}
+if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js'));
+
+/* ---------- início ---------- */
+document.addEventListener('contextmenu',e=>e.preventDefault());
+document.addEventListener('gesturestart',e=>e.preventDefault());
+addEventListener('resize',()=>S&&render());
+addEventListener('orientationchange',()=>setTimeout(()=>S&&render(),250));
+setInterval(()=>{if(S&&!won&&!document.hidden){S.time++;info();if(S.time%5===0)save()}},1000);
+if(load())render();else newGame();
+})();
+</script>
+</body>
+</html>
